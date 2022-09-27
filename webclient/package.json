@@ -1,0 +1,16 @@
+{
+  "name": "sydneytrainsnearme",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "vite --host 0.0.0.0 --port 6200",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^2.6.7"
+  },
+  "dependencies": {
+    "ol": "^6.8.1",
+    "ol-hashed": "^2.1.0"
+  }
+}
