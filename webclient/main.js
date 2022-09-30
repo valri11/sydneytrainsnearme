@@ -4,6 +4,7 @@ import Map from 'ol/Map';
 import View from 'ol/View';
 import {Tile as TileLayer, VectorTile as VectorTileLayer, Image as ImageLayer} from 'ol/layer';
 import {TileDebug, OSM, XYZ, VectorTile, Raster} from 'ol/source';
+import TileImage from 'ol/source/TileImage';
 import {GeoJSON, MVT} from 'ol/format';
 import {createStringXY} from 'ol/coordinate';
 import {fromLonLat, getPointResolution} from 'ol/proj';
@@ -26,118 +27,80 @@ import {toStringHDMS} from 'ol/coordinate';
 // POI
 const sydney = fromLonLat([151.2061999882396,-33.8732161200895])
 
-const labelStyle = new Style({
-  text: new Text({
-    font: '8px Calibri,sans-serif',
-    overflow: true,
-    fill: new Fill({
-      color: '#000',
-    }),
-    stroke: new Stroke({
-      color: '#fff',
-      width: 3,
-    }),
-  }),
-});
-
-const lineStyle = new Style({
-  fill: new Fill({
-    color: 'rgba(255, 255, 255, 0.6)',
-  }),
-  stroke: new Stroke({
-    color: '#319FD3',
-    width: 1,
-  }),
-});
-
-const style = [lineStyle, labelStyle];
+const url = new URL(window.location.href);
+const queryString = url.search;
+console.log(queryString);
+const urlParams = new URLSearchParams(queryString);
+var mapSelector = urlParams.get('map')
+if (mapSelector == null || mapSelector == '') {
+    mapSelector = 'osm';
+}
+var modeSelector = urlParams.get('mode')
+if (modeSelector == null || modeSelector == '') {
+    modeSelector = 'sse';
+}
+console.log(`map: ${mapSelector}, mode: ${modeSelector}`);
 
 const sourceSydneyTrainsSse = new VectorSource({
-  format: new GeoJSON(),
+    format: new GeoJSON(),
+});
+
+const sourceSydneyTrainsMvt = new VectorSource({
+    format: new MVT(),
 });
 
 
-var source = new EventSource(`${env.sydneytrains.proto}://${env.sydneytrains.host}:${env.sydneytrains.port}/sydneytrainsnearme.sse`);
-source.onmessage = function (event) {
-    console.log('got data');
-    //var traindata = JSON.parse(event.data);
-    //console.log(traindata);
-    var features = sourceSydneyTrainsSse.getFormat().readFeatures(event.data, {
-      dataProjection: 'EPSG:4326',
-      featureProjection: 'EPSG:3857',
-    });
-    sourceSydneyTrainsSse.clear(true);
-    sourceSydneyTrainsSse.addFeatures(features);
-    sourceSydneyTrainsSse.changed();
+var sseSource;
+var wsSource;
+
+if (modeSelector == 'ws') {
+    wsSource = new WebSocket(`ws://${env.sydneytrains.host}:${env.sydneytrains.port}/sydneytrainsnearme.ws`);
+
+    wsSource.onopen = () => {
+        console.log("Successfully Connected");
+    };
+
+    wsSource.onclose = event => {
+        console.log("Socket Closed Connection: ", event);
+    };
+
+    wsSource.onerror = error => {
+        console.log("Socket Error: ", error);
+    };
+
+    wsSource.onmessage = (event) => { 
+        console.log('got data');
+        //var traindata = JSON.parse(event.data);
+        //console.log(traindata);
+        var features = sourceSydneyTrainsSse.getFormat().readFeatures(event.data, {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857',
+        });
+        sourceSydneyTrainsSse.clear(true);
+        sourceSydneyTrainsSse.addFeatures(features);
+        sourceSydneyTrainsSse.changed();
+    }
+} else {
+    sseSource = new EventSource(`${env.sydneytrains.proto}://${env.sydneytrains.host}:${env.sydneytrains.port}/sydneytrainsnearme.sse`);
+
+    sseSource.onerror = function (event) {
+        console.log("sse error");
+        sourceSydneyTrainsSse.clear();
+    }
+
+    sseSource.onmessage = function (event) {
+        console.log('got data');
+        //var traindata = JSON.parse(event.data);
+        //console.log(traindata);
+        var features = sourceSydneyTrainsSse.getFormat().readFeatures(event.data, {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857',
+        });
+        sourceSydneyTrainsSse.clear(true);
+        sourceSydneyTrainsSse.addFeatures(features);
+        sourceSydneyTrainsSse.changed();
+    }
 }
-source.onerror = function (event) {
-    console.log("sse error");
-    sourceSydneyTrainsSse.clear();
-}
-
-/*
-let socket = new WebSocket(`ws://${env.sydneytrains.host}:${env.sydneytrains.port}/sydneytrainsnearme.ws`);
-
-socket.onopen = () => {
-    console.log("Successfully Connected");
-};
-
-socket.onclose = event => {
-    console.log("Socket Closed Connection: ", event);
-};
-
-socket.onerror = error => {
-    console.log("Socket Error: ", error);
-};
-
-socket.onmessage = (event) => { 
-    console.log('got data');
-    //var traindata = JSON.parse(event.data);
-    //console.log(traindata);
-    var features = sourceSydneyTrainsSse.getFormat().readFeatures(event.data, {
-      dataProjection: 'EPSG:4326',
-      featureProjection: 'EPSG:3857',
-    });
-    sourceSydneyTrainsSse.clear(true);
-    sourceSydneyTrainsSse.addFeatures(features);
-    sourceSydneyTrainsSse.changed();
-}
-*/
-
-const sourceSydneyTrains = new VectorSource({
-  format: new GeoJSON(),
-  loader: function(extent, resolution, projection, success, failure) {
-     var proj = projection.getCode();
-     var coord = getCenter(extent)
-     var coordLonLat = toLonLat(coord) 
-     console.log(coordLonLat); 
-     var lon = coordLonLat[0];
-     var lat = coordLonLat[1];
-     var url = `${env.sydneytrains.proto}://${env.sydneytrains.host}:${env.sydneytrains.port}/sydneytrainsnearme.geojson`
-     console.log(url);
-     var xhr = new XMLHttpRequest();
-     xhr.open('GET', url);
-     var onError = function() {
-       sourceSydneyTrains.removeLoadedExtent(extent);
-       failure();
-     }
-     xhr.onerror = onError;
-     xhr.onload = function() {
-       if (xhr.status == 200) {
-         var features = sourceSydneyTrains.getFormat().readFeatures(xhr.responseText, {
-           dataProjection: 'EPSG:4326',
-           featureProjection: 'EPSG:3857',
-         });
-         sourceSydneyTrains.addFeatures(features);
-         success(features);
-       } else {
-         onError();
-       }
-     }
-     xhr.send();
-   },
-   strategy: bbox
-});
 
 function pointStyleFunction(feature, resolution) {
   var properties = feature.getProperties()
@@ -150,32 +113,23 @@ function pointStyleFunction(feature, resolution) {
       textValue = trainId;
   }
   return new Style({
-     image: new Circle({
-       radius: 10,
-       fill: new Fill({
-         color: [0, 153, 255, 1],
-       }),
-       stroke: new Stroke({
-         color: [255, 255, 255, 1],
-         width: 4,
-       }),
-     }),
+    image: new Icon({
+        src: './train.svg',
+        scale: 0.1,
+    }),
     text: new Text({
         textAlign: "left",
         offsetX: 14,
         text: textValue,
-        font: 'bold 16px Calibri,sans-serif',
+        font: 'bold 16px Helvetica,sans-serif',
+        //fill: new Fill({color: [70, 120, 200, 1]}),
+        //fill: new Fill({color: [1, 128, 253, 1]}),
+        fill: new Fill({color: '#0180FD'}),
+        stroke: new Stroke({color: [0,0,0,1], width: 5}),
     }),
-     zIndex: Infinity,
+    zIndex: Infinity,
   });
 }
-
-const sydneyTrainsLayer = new VectorLayer({
-    source: sourceSydneyTrains,
-    style: pointStyleFunction,
-    declutter: true,
-    minZoom: 12,
-});
 
 const sydneyTrainsLayerSse = new VectorLayer({
     source: sourceSydneyTrainsSse,
@@ -187,6 +141,14 @@ const sydneyTrainsLayerSse = new VectorLayer({
 const sourceLocation = new VectorSource();
 const locationLayer = new VectorLayer({
   source: sourceLocation,
+});
+
+const tileService = new TileImage({
+    url: `${env.nearmap.tile}/tiles/v3/Vert/{z}/{x}/{y}.img?apikey=${env.nearmap.apikey}&tertiary=satellite`,
+});
+
+const nearmapLayer = new TileLayer({
+    source: tileService,
 });
 
 const debugLayer = new TileLayer({
@@ -215,7 +177,7 @@ const map = new Map({
   target: 'map',
   layers: [
     basemapLayer,
-    //sydneyTrainsLayer,
+    nearmapLayer,
     sydneyTrainsLayerSse,
     debugLayer,
     locationLayer,
@@ -236,38 +198,6 @@ function flyTo(location, done) {
     view.setCenter(location);
 }
 
-var feature_onHover;
-map.on('pointermove', function(evt) {
-
-  feature_onHover = map.forEachFeatureAtPixel(evt.pixel, function(feature, layer) {
-    console.log(feature);
-    return feature;
-  });
-
-  if (feature_onHover == null) {
-      return;
-  }
-
-  var content = document.getElementById('popup-content');
-  var properties = feature_onHover.getProperties()
-
-  var trainLabel = properties["label"];
-  if (trainLabel == null) {
-      return;
-  }
-
-  var info = document.getElementById('mouse-position');
-  var infoText = '<pre>';
-  infoText += 'Train: ' + JSON.stringify(trainLabel);
-  infoText += '\n';
-  infoText += '</pre>';
-  info.innerHTML = infoText;
-
-  var coordinate = evt.coordinate;
-  content.innerHTML = infoText;
-  overlay.setPosition(coordinate);
-});
-
 var mousePositionControl = new MousePosition({
   coordinateFormat: createStringXY(4),
   projection: 'EPSG:4326'
@@ -275,30 +205,15 @@ var mousePositionControl = new MousePosition({
 
 map.addControl(mousePositionControl);
 
-var container = document.getElementById('popup');
-var content = document.getElementById('popup-content');
-var closer = document.getElementById('popup-closer');
-
-var overlay = new Overlay({
-  element: container,
-  autoPan: true,
-  autoPanAnimation: {
-    duration: 250
-  }
-});
-map.addOverlay(overlay);
-
-closer.onclick = function() {
-  overlay.setPosition(undefined);
-  closer.blur();
-  return false;
-};
-
 document.getElementById("checkbox-debug").addEventListener('change', function() {
   debugLayer.setVisible(this.checked);
 });
 
 debugLayer.setVisible(document.getElementById("checkbox-debug").checked);
+
+if (mapSelector != 'nea') {
+    nearmapLayer.setVisible(false);
+}
 
 navigator.geolocation.watchPosition(
   function (pos) {
